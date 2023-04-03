@@ -42,7 +42,8 @@ Default framerate is 15. You can change 15 to any number you wish, this is how t
 See https://ffmpeg.org/ffmpeg-filters.html#fps for more information
 </details>
 <details>
-<summary>Resolution</summary> 
+<summary>Resolution</summary>
+    
 In short, scale = resolution, width:height in pixels to be exact. 
 
 If you put -1 instead of one of the values (like in the default command), it will be scaled without losing proportions.
@@ -66,13 +67,15 @@ This is how the command would look like with source material's resolution:
 See https://ffmpeg.org/ffmpeg-filters.html#scale for more information 
 </details>
 <details>
-<summary>Looping</summary> 
+<summary>Looping</summary>
+
 Default value of **0** means the GIF will loop indefinitely. **-1** would mean no looping, and **1** would mean one loop, so the GIF will play twice. **22** would mean the GIF will play 23 times.
 
 See https://ffmpeg.org/ffmpeg.html#Main-options for more information.
 </details>
 <details>
 <summary>Other uses</summary>
+
 You might notice that this extension simply executes a command with filled parameters. You can of course change it, here is an example command which will just export the selected timeframe to mp4 instead of turning it into a GIF.
 
     ffmpeg -i {input_file} -ss {start_timestamp} -to {stop_timestamp} -c:v copy -c:a copy {output_path}/{output_filename}.mp4
