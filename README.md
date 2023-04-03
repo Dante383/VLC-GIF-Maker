@@ -33,14 +33,16 @@ This is how the command looks by default, important bits are bold:
 
 ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_file} -vf "**fps=15**,**scale=498:-1**:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" **-loop 0** {output_path}/{output_filename}
 
-### Framerate
+<details>
+<summary>Framerate</summary>
 Default framerate is 15. You can change 15 to any number you wish, this is how the command would look like with framerate 30:
 
     ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_file} -vf "fps=30,scale=498:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop 0 {output_path}/{output_filename}
 
 See https://ffmpeg.org/ffmpeg-filters.html#fps for more information
-
-### Resolution 
+</details>
+<details>
+<summary>Resolution</summary> 
 In short, scale = resolution, width:height in pixels to be exact. 
 
 If you put -1 instead of one of the values (like in the default command), it will be scaled without losing proportions.
@@ -62,13 +64,16 @@ This is how the command would look like with source material's resolution:
     ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_file} -vf "fps=15,scale=flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop 0 {output_path}/{output_filename}  
  
 See https://ffmpeg.org/ffmpeg-filters.html#scale for more information 
-
-### Looping 
+</details>
+<details>
+<summary>Looping</summary> 
 Default value of **0** means the GIF will loop indefinitely. **-1** would mean no looping, and **1** would mean one loop, so the GIF will play twice. **22** would mean the GIF will play 23 times.
 
 See https://ffmpeg.org/ffmpeg.html#Main-options for more information.
-
-### Other uses
+</details>
+<details>
+<summary>Other uses</summary>
 You might notice that this extension simply executes a command with filled parameters. You can of course change it, here is an example command which will just export the selected timeframe to mp4 instead of turning it into a GIF.
 
     ffmpeg -i {input_file} -ss {start_timestamp} -to {stop_timestamp} -c:v copy -c:a copy {output_path}/{output_filename}.mp4
+</details>
