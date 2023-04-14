@@ -17,20 +17,21 @@ default_command = 'ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_f
 
 function get_timestamp()
     local microseconds = vlc.var.get(vlc.object.input(), "time")
-    local seconds = math.floor((microseconds/1000)/1000)
+    local seconds_total = math.floor((microseconds/1000)/1000)
 
-    local hours = math.floor((seconds % 86400)/3600)
-    local minutes = math.floor((seconds % 3600)/60)
-    local seconds = math.floor((seconds % 60))
+    local hours = math.floor((seconds_total % 86400)/3600)
+    local minutes = math.floor((seconds_total % 3600)/60)
+    local seconds = math.floor((seconds_total % 60))
+    local miliseconds = math.floor((microseconds % 1000))
 
     -- format() seems to not be supported :(
-    return hours .. ":" .. minutes .. ":" .. seconds
+    return hours .. ":" .. minutes .. ":" .. seconds .. "." .. miliseconds
 end
 
 function load_command()
-    local path = vlc.config.configdir() .. "/gif_maker_command"
+    local config_path = vlc.config.configdir() .. "/gif_maker_command"
 
-    local command_file, err = io.open(path, "r")
+    local command_file, err = io.open(config_path, "r")
     
     if command_file == nil then 
         command = default_command
@@ -41,25 +42,57 @@ function load_command()
     command_file:close()
 
     if not command or command == "" then
-        command = default_command;
+        command = default_command
         save_command(command)
     end
 
-    return command;
+    return command
 end
 
 
 function save_command (command)
-    path = vlc.config.configdir() .. "/gif_maker_command"
+    config_path = vlc.config.configdir() .. "/gif_maker_command"
 
-    local file = assert(io.open(path, 'w+b'), 'Error while saving the command');
-    file:write(command);
-    file:close();
+    local file = assert(io.open(config_path, 'w+b'), 'Error while saving the command')
+    file:write(command)
+    file:close()
+end
+
+-- seperate file for path so there are no issues and weird gimmicks with multi-line commands
+-- this is a simple project after all, not nginx 
+function load_output_path ()
+    local config_path = vlc.config.configdir() .. "/gif_maker_output_path"
+
+    local path_file, err = io.open(config_path, "r")
+    
+    if path_file == nil then 
+        output_path = vlc.config.homedir()
+        save_output_path(vlc.config.homedir())
+    end 
+
+    output_path = path_file:read()
+    path_file:close()
+
+    if not output_path or output_path == "" then
+        output_path = vlc.config.homedir()
+        save_output_path(output_path)
+    end
+
+    return output_path
+end
+
+function save_output_path (output_path)
+    config_path = vlc.config.configdir() .. "/gif_maker_output_path"
+
+    local file = assert(io.open(config_path, 'w+b'), 'Error while saving output path')
+    file:write(output_path)
+    file:close()
 end
 
 function create_window()
     local input = vlc.object.input()
     command = load_command()
+    output_path = load_output_path()
 
     dlg = vlc.dialog("GIF Maker")
 
@@ -77,7 +110,7 @@ function create_window()
     command_input = dlg:add_text_input(command, 1, 4, 4)
 
     dlg:add_label("GIFs output path:", 1, 5)
-    output_path_input = dlg:add_text_input(vlc.config.homedir(), 1, 6, 4)
+    output_path_input = dlg:add_text_input(output_path, 1, 6, 4)
 
     dlg:add_label("Filename (leave empty to randomly generate):", 1, 7)
     output_filename_input = dlg:add_text_input('', 1, 8, 4)
@@ -112,6 +145,7 @@ function generate_gif()
     end
     
     save_command(command)
+    save_output_path(output_path)
 
     command = string.gsub(command, '{start_timestamp}', start_timestamp)
     command = string.gsub(command, '{stop_timestamp}', stop_timestamp)
