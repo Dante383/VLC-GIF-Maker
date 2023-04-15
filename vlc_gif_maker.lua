@@ -13,7 +13,9 @@ suitable to your operating system:
 To open GIF Maker: View > VLC Gif Maker
 --]]----------------------------------------
 
-default_command = 'ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_file} -vf "fps=15,scale=498:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop 0 "{output_path}/{output_filename}.gif"'
+default_command = 'ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_file} -vf "fps={fps},scale=498:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop {loop} "{output_path}/{output_filename}.gif"'
+command = false
+output_path = false
 
 function get_timestamp()
     local microseconds = vlc.var.get(vlc.object.input(), "time")
@@ -28,73 +30,58 @@ function get_timestamp()
     return hours .. ":" .. minutes .. ":" .. seconds .. "." .. miliseconds
 end
 
-function load_command()
-    local config_path = vlc.config.configdir() .. "/gif_maker_command"
-
-    local command_file, err = io.open(config_path, "r")
-    
-    if command_file == nil then 
-        command = default_command
-        save_command(command)
-    end 
-
-    command = command_file:read()
-    command_file:close()
-
-    if not command or command == "" then
-        command = default_command
-        save_command(command)
-    end
-
-    return command
-end
-
-
-function save_command (command)
-    config_path = vlc.config.configdir() .. "/gif_maker_command"
-
-    local file = assert(io.open(config_path, 'w+b'), 'Error while saving the command')
-    file:write(command)
-    file:close()
-end
-
 -- seperate file for path so there are no issues and weird gimmicks with multi-line commands
 -- this is a simple project after all, not nginx 
-function load_output_path ()
-    local config_path = vlc.config.configdir() .. "/gif_maker_output_path"
+function load_config(filename)
+    local config_path = vlc.config.configdir() .. "/gif_maker_" .. filename
 
-    local path_file, err = io.open(config_path, "r")
+    local config_file, err = io.open(config_path, "r")
     
-    if path_file == nil then 
-        output_path = vlc.config.homedir()
-        save_output_path(vlc.config.homedir())
+    if config_file == nil then
+        if filename == 'command' then 
+            value = default_command
+        elseif filename == 'output_path' then 
+            value = vlc.config.homedir()
+        end
+        save_config(filename, value)
     end 
 
-    output_path = path_file:read()
-    path_file:close()
+    value = config_file:read()
+    config_file:close()
 
-    if not output_path or output_path == "" then
-        output_path = vlc.config.homedir()
-        save_output_path(output_path)
+    if not value or value == "" then
+        if filename == 'command' then 
+            value = default_command
+        elseif filename == 'output_path' then 
+            value = vlc.config.homedir()
+        end
+        save_config(filename, value)
     end
 
-    return output_path
+    return value
 end
 
-function save_output_path (output_path)
-    config_path = vlc.config.configdir() .. "/gif_maker_output_path"
+function save_config(filename, value)
+    config_path = vlc.config.configdir() .. "/gif_maker_" .. filename
 
-    local file = assert(io.open(config_path, 'w+b'), 'Error while saving output path')
-    file:write(output_path)
+    local file = assert(io.open(config_path, 'w+b'), 'Error while saving the ' .. filename)
+    file:write(value)
     file:close()
 end
 
-function create_window()
+function gui_create_ffmpeg_warning()
+    ffmpegDlg = vlc.dialog("GIF Maker")
+
+    -- col, row, col_span, row_span, width, height
+    ffmpegDlg:add_label("WARNING: ffmpeg couldn't be found! Make sure it's available globally (PATH for Windows users)", 1, 1)
+    ffmpegDlg:add_button("OK", startExtension, 1, 2)
+end
+
+function gui_create_main_dialog(command, output_path)
     local input = vlc.object.input()
-    command = load_command()
-    output_path = load_output_path()
 
     dlg = vlc.dialog("GIF Maker")
+    -- left side
 
     -- col, row, col_span, row_span, width, height
     dlg:add_label("Start time: ", 1, 1)
@@ -105,17 +92,45 @@ function create_window()
     stop_timestamp_input = dlg:add_text_input("", 2, 2)
     dlg:add_button("Get", fill_stop_timestamp, 3, 2)
 
-    dlg:add_label("Command to execute (for advanced users):", 1, 3)
-    dlg:add_button("Set to default", set_default_command, 3, 3)
-    command_input = dlg:add_text_input(command, 1, 4, 4)
+    dlg:add_label("GIFs output path:", 1, 3)
+    output_path_input = dlg:add_text_input(output_path, 1, 4, 3)
 
-    dlg:add_label("GIFs output path:", 1, 5)
-    output_path_input = dlg:add_text_input(output_path, 1, 6, 4)
+    dlg:add_label("Filename (leave empty to randomly generate):", 1, 5)
+    output_filename_input = dlg:add_text_input('', 1, 6, 3)
 
-    dlg:add_label("Filename (leave empty to randomly generate):", 1, 7)
-    output_filename_input = dlg:add_text_input('', 1, 8, 4)
+    -- right side
+    
+    separator_string = '|<br/>'
+    for var=0,17 do
+        separator_string = separator_string .. '|<br/>'
+    end 
 
-    dlg:add_button("Generate GIF", generate_gif, 1, 9, 4)
+    dlg:add_label("<div style='color:#000; line-height:80%;'>" .. separator_string .. "</div>", 4, 1, 1, 8)
+
+    dlg:add_label("<b>Advanced settings:</b>", 6, 1)
+
+    dlg:add_label("Command to execute:", 5, 2, 2)
+    dlg:add_button("Set to default", set_default_command, 7, 2)
+    command_input = dlg:add_text_input(command, 5, 3, 3)
+
+    dlg:add_label("FPS", 5, 4, 1)
+    fps_input = dlg:add_text_input("15", 5, 5, 1)
+
+    dlg:add_label("Looping", 6, 4, 1)
+    looping_input = dlg:add_dropdown(6, 5, 1)
+    looping_input:add_value("Loop GIF", 0)
+    looping_input:add_value("Only play once", -1)
+
+   --[[dlg:add_label("Resolution", 7, 4, 1)
+    resolution_input = dlg:add_dropdown(7, 5, 1)
+    resolution_input:add_value("498px x height", 1) 
+    resolution_input:add_value("Don't scale (input video resolution)", 2)
+    resolution_input:add_value("Set height in pixels:", 3)
+    resolution_input:add_value("Set width in pixels:", 4)
+    resolution_input:add_value("Set height and width in pixels:", 5)]]
+
+    -- middle 
+    dlg:add_button("Generate GIF", generate_gif, 3, 9, 3, 2)
 end
 
 function fill_start_timestamp()
@@ -126,10 +141,23 @@ function fill_stop_timestamp()
     stop_timestamp_input:set_text(get_timestamp())
 end
 
+function generateCommand(command, generalOptions, commandBuilder)
+    for optionName,optionValue in pairs(generalOptions) do 
+        command = string.gsub(command, optionName, optionValue)
+    end
+
+    if commandBuilder then 
+        return generateCommand(command, commandBuilder)
+    end
+        
+    return command
+end
+
 function generate_gif()
     local start_timestamp = start_timestamp_input:get_text()
     local stop_timestamp = stop_timestamp_input:get_text()
     local command = command_input:get_text()
+    local fps = fps_input:get_text()
 
     local item = vlc.input.item()
     local uri = item:uri()
@@ -144,14 +172,21 @@ function generate_gif()
         output_filename = output_filename:match('([^.]+)') -- remove extension
     end
     
-    save_command(command)
-    save_output_path(output_path)
+    save_config('command', command)
+    save_config('output_path', output_path)
 
-    command = string.gsub(command, '{start_timestamp}', start_timestamp)
-    command = string.gsub(command, '{stop_timestamp}', stop_timestamp)
-    command = string.gsub(command, '{input_file}', media_path)
-    command = string.gsub(command, '{output_path}', output_path)
-    command = string.gsub(command, '{output_filename}', output_filename)
+    local generalOptions = {}
+    generalOptions['{start_timestamp}'] = start_timestamp
+    generalOptions['{stop_timestamp}'] = stop_timestamp
+    generalOptions['{input_file}'] = media_path
+    generalOptions['{output_path}'] = output_path
+    generalOptions['{output_filename}'] = output_filename
+
+    local commandBuilder = {}
+    commandBuilder['{fps}'] = fps
+    commandBuilder['{loop}'] = looping_input:get_value()
+
+    command = generateCommand(command, generalOptions, commandBuilder)
     
     os.execute(command)
     vlc.osd.message("GIF created! Saved to " .. output_path .. "/" .. output_filename, 1, "top", 3000000) -- why, tf, is vlc's osd msg duration in MICROseconds??
@@ -159,7 +194,25 @@ end
 
 function set_default_command()
     command_input:set_text(default_command)
-    save_command(default_command)
+    save_config('command', default_command)
+end
+
+function check_ffmpeg_status()
+    status_code = os.execute("ffmpeg -version")
+    if status_code then
+        startExtension(command, output_path)
+    else 
+        gui_create_ffmpeg_warning()
+    end
+end
+
+function startExtension()
+    if ffmpegDlg then 
+        ffmpegDlg:delete()
+        ffmpegDlg = nil 
+        startExtension()
+    end
+    gui_create_main_dialog(command, output_path)
 end
 
 -- functions below are called by VLC
@@ -167,7 +220,7 @@ end
 function descriptor()
     return {
         title = "VLC GIF maker";
-        version = "0.1";
+        version = "0.0.3";
         author = "Piotr Zdolski";
         url = "https://github.com/Dante383/VLC_GIF_Maker";
         description = [[
@@ -179,12 +232,20 @@ end
 
 
 function activate()
-    create_window()
+    command = load_config('command')
+    output_path = load_config('output_path')
+
+    -- is ffmpeg even used in the current command?
+    if string.find(command, "ffmpeg") then
+        check_ffmpeg_status()
+    else 
+        startExtension()
+    end
 end
 
 
 function deactivate()
-    save_command(command)
+    save_config('command', command)
 end
 
 
@@ -192,6 +253,11 @@ function close()
     if dlg then
         dlg:delete()
         dlg = nil
+    end
+    if ffmpegDlg then 
+        ffmpegDlg:delete()
+        ffmpegDlg = nil 
+        startExtension()
     end
 end
 
