@@ -143,15 +143,16 @@ function fill_stop_timestamp()
 end
 
 function generateCommand(command, generalOptions, commandBuilder)
-    command = string.gsub(command, "%%20", " ") -- escape spaces for windows
     for optionName,optionValue in pairs(generalOptions) do 
-        command = string.gsub(command, optionName, string.gsub(optionValue, "%%20", " "))
+        command = string.gsub(command, optionName, optionValue)
     end
 
     if commandBuilder then 
         return generateCommand(command, commandBuilder)
     end
-        
+    
+    command = string.gsub(command, '\\', '\\')
+    vlc.msg.info(command)
     return command
 end
 
