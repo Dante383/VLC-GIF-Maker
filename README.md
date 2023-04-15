@@ -27,20 +27,12 @@ and click "Get" by the inputs. The timestamps will be set automatically.
 
 Press "Generate GIF" and it's gonna be saved to the path you specified, followed by a confirmation on the VLC screen. 
 
-## Adjusting framerate, resolution and looping
+## Adjusting resolution
 
 This is how the command looks by default, important bits are bold:
 
-ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_file} -vf "**fps=15**,**scale=498:-1**:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" **-loop 0** {output_path}/{output_filename}
+ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_file} -vf "fps={fps},**scale=498:-1**:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop {looping} "{output_path}/{output_filename}.gif"
 
-<details>
-<summary>Framerate</summary>
-Default framerate is 15. You can change 15 to any number you wish, this is how the command would look like with framerate 30:
-
-    ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_file} -vf "fps=30,scale=498:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop 0 {output_path}/{output_filename}
-
-See https://ffmpeg.org/ffmpeg-filters.html#fps for more information
-</details>
 <details>
 <summary>Resolution</summary>
     
@@ -65,13 +57,6 @@ This is how the command would look like with source material's resolution:
     ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_file} -vf "fps=15,scale=flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop 0 {output_path}/{output_filename}  
  
 See https://ffmpeg.org/ffmpeg-filters.html#scale for more information 
-</details>
-<details>
-<summary>Looping</summary>
-
-Default value of **0** means the GIF will loop indefinitely. **-1** would mean no looping, and **1** would mean one loop, so the GIF will play twice. **22** would mean the GIF will play 23 times.
-
-See https://ffmpeg.org/ffmpeg.html#Main-options for more information.
 </details>
 <details>
 <summary>Other uses</summary>
