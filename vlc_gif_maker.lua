@@ -44,6 +44,7 @@ function load_config(filename)
             value = vlc.config.homedir()
         end
         save_config(filename, value)
+        return value
     end 
 
     value = config_file:read()
@@ -142,8 +143,9 @@ function fill_stop_timestamp()
 end
 
 function generateCommand(command, generalOptions, commandBuilder)
+    command = string.gsub(command, "%%20", " ") -- escape spaces for windows
     for optionName,optionValue in pairs(generalOptions) do 
-        command = string.gsub(command, optionName, optionValue)
+        command = string.gsub(command, optionName, string.gsub(optionValue, "%%20", " "))
     end
 
     if commandBuilder then 
