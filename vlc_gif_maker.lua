@@ -17,6 +17,18 @@ default_command = 'ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_f
 command = false
 output_path = false
 
+function esc(x)
+    x = tostring(x)
+    return (x:gsub('%%', '%')
+            :gsub('^%^', '%^')
+            :gsub('%$$', '%$')
+            :gsub('%(', '%(')
+            :gsub('%)', '%)')
+            :gsub('%[', '%[')
+            :gsub('%]', '%]')
+            )
+end
+
 function get_timestamp()
     local microseconds = vlc.var.get(vlc.object.input(), "time")
     local seconds_total = math.floor((microseconds/1000)/1000)
@@ -144,7 +156,8 @@ end
 
 function generateCommand(command, generalOptions, commandBuilder)
     for optionName,optionValue in pairs(generalOptions) do 
-        command = string.gsub(command, optionName, optionValue)
+        if vlc.windows then optionValue = string.gsub(optionValue, '//', '\\') end
+        command = string.gsub(command, optionName, esc(optionValue))
     end
 
     if commandBuilder then 
