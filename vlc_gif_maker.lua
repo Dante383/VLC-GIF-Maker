@@ -156,8 +156,8 @@ end
 
 function generateCommand(command, generalOptions, commandBuilder)
     for optionName,optionValue in pairs(generalOptions) do 
-        if vlc.windows and string.sub(optionValue, 1,1) == '/' then optionValue = string.sub(optionValue, 2, -1) end
-        if vlc.windows then optionValue = string.gsub(optionValue, '//', '\\') end
+        if vlc.win and string.sub(optionValue, 1,1) == '/' then optionValue = string.sub(optionValue, 2, -1) end
+        if vlc.win then optionValue = string.gsub(optionValue, '//', '\\') end
         command = string.gsub(command, optionName, esc(optionValue))
     end
 
