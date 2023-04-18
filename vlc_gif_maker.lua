@@ -235,7 +235,7 @@ end
 function descriptor()
     return {
         title = "VLC GIF maker";
-        version = "0.0.3";
+        version = "0.0.5";
         author = "Piotr Zdolski";
         url = "https://github.com/Dante383/VLC_GIF_Maker";
         description = [[
