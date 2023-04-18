@@ -17,20 +17,6 @@ default_command = 'ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_f
 command = false
 output_path = false
 
-function esc(x)
-    x = tostring(x)
-    return (x:gsub('%%', '%')
-            :gsub('^%^', '%^')
-            :gsub('%$$', '%$')
-            :gsub('%(', '%(')
-            :gsub('%)', '%)')
-            :gsub('%[', '%[')
-            :gsub('%]', '%]')
-            :gsub('%+', '+')
-            :gsub('%-', '-')
-            )
-end
-
 function string_replace(target, substring, replacement, n)
     return (target:gsub(substring:gsub("%p", "%%%0"), replacement:gsub("%%", "%%%%"), n))
 end
@@ -164,7 +150,7 @@ function generateCommand(command, generalOptions, commandBuilder)
     for optionName,optionValue in pairs(generalOptions) do 
         if vlc.windows and string.sub(optionValue, 1,1) == '/' then optionValue = string.sub(optionValue, 2, -1) end
         if vlc.windows then optionValue = string.gsub(optionValue, '//', '\\') end
-        command = string_replace(command, optionName, esc(optionValue))
+        command = string_replace(command, optionName, tostring(optionValue))
     end
 
     if commandBuilder then 
@@ -172,6 +158,9 @@ function generateCommand(command, generalOptions, commandBuilder)
     end
     
     command = string.gsub(command, '\\', '\\')
+    if vlc.windows then command = string_replace(command, '/', '\\') end
+    command = string_replace(command, '%5B', '[')
+    command = string_replace(command, '%5D', ']')
     vlc.msg.info(command)
     return command
 end
@@ -184,8 +173,12 @@ function generate_gif()
 
     local item = vlc.input.item()
     local uri = item:uri()
-    local media_path = string.gsub(uri, '^file://', '') 
-
+    local media_path
+    if vlc.windows then
+        media_path = string.gsub(uri, '^file:///', '') 
+    else 
+        media_path = string.gsub(uri, '^file://', '')
+    end
     local output_path = output_path_input:get_text()
     local output_filename = output_filename_input:get_text()
 
