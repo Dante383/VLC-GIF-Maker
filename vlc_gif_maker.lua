@@ -26,7 +26,13 @@ function esc(x)
             :gsub('%)', '%)')
             :gsub('%[', '%[')
             :gsub('%]', '%]')
+            :gsub('%+', '+')
+            :gsub('%-', '-')
             )
+end
+
+function string_replace(target, substring, replacement, n)
+    return (target:gsub(substring:gsub("%p", "%%%0"), replacement:gsub("%%", "%%%%"), n))
 end
 
 function get_timestamp()
@@ -156,9 +162,9 @@ end
 
 function generateCommand(command, generalOptions, commandBuilder)
     for optionName,optionValue in pairs(generalOptions) do 
-        if vlc.win and string.sub(optionValue, 1,1) == '/' then optionValue = string.sub(optionValue, 2, -1) end
-        if vlc.win then optionValue = string.gsub(optionValue, '//', '\\') end
-        command = string.gsub(command, optionName, esc(optionValue))
+        if vlc.windows and string.sub(optionValue, 1,1) == '/' then optionValue = string.sub(optionValue, 2, -1) end
+        if vlc.windows then optionValue = string.gsub(optionValue, '//', '\\') end
+        command = string_replace(command, optionName, esc(optionValue))
     end
 
     if commandBuilder then 
