@@ -148,8 +148,7 @@ end
 
 function generateCommand(command, generalOptions, commandBuilder)
     for optionName,optionValue in pairs(generalOptions) do 
-        if vlc.windows and string.sub(optionValue, 1,1) == '/' then optionValue = string.sub(optionValue, 2, -1) end
-        if vlc.windows then optionValue = string.gsub(optionValue, '//', '\\') end
+        if vlc.win and string.sub(optionValue, 1,1) == '/' then optionValue = string.sub(optionValue, 2, -1) end
         command = string_replace(command, optionName, tostring(optionValue))
     end
 
@@ -158,7 +157,7 @@ function generateCommand(command, generalOptions, commandBuilder)
     end
     
     command = string.gsub(command, '\\', '\\')
-    if vlc.windows then command = string_replace(command, '/', '\\') end
+    if vlc.win then command = string_replace(command, '/', '\\') end
     command = string_replace(command, '%5B', '[')
     command = string_replace(command, '%5D', ']')
     vlc.msg.info(command)
@@ -174,7 +173,7 @@ function generate_gif()
     local item = vlc.input.item()
     local uri = item:uri()
     local media_path
-    if vlc.windows then
+    if vlc.win then
         media_path = string.gsub(uri, '^file:///', '') 
     else 
         media_path = string.gsub(uri, '^file://', '')
