@@ -3,7 +3,7 @@ Extension to the VLC player which allows you to easily generate GIFs from watche
 
 ## Installation 
 
-**WARNGING: THIS EXTENSION REQUIRES FFMPEG TO BE INSTALLED (and put in PATH for Windows)**
+**WARNING: THIS EXTENSION REQUIRES FFMPEG TO BE INSTALLED (and put in PATH for Windows)**
 
 Put "vlc_gif_maker.lua" file in directory suitable for your operating system:
 
