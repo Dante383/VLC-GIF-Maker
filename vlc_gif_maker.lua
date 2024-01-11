@@ -13,7 +13,7 @@ suitable to your operating system:
 To open GIF Maker: View > VLC Gif Maker
 --]]----------------------------------------
 
-default_command = 'ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_file} -vf "fps={fps},scale=498:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop {loop} "{output_path}/{output_filename}.gif"'
+default_command = 'ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i "{input_file}" -vf "fps={fps},scale=498:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop {loop} "{output_path}/{output_filename}.gif"'
 command = false
 output_path = false
 
