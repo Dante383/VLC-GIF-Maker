@@ -14,6 +14,21 @@ Put "vlc_gif_maker.lua" file in directory suitable for your operating system:
 * Mac OS X (all users): /Applications/VLC.app/Contents/MacOS/share/lua/extensions/
 * Mac OS X (current user): /Users/%your_name%/Library/Application Support/org.videolan.vlc/lua/extensions/
 
+### Linux (Debian/Ubuntu)
+
+A small installer is included for Debian-based distributions. It copies
+`vlc_gif_maker.lua` into the right VLC extensions directory and offers to
+install VLC and ffmpeg when they are missing.
+
+```bash
+./install.sh            # prompts: 1) current user  2) all users
+./install.sh -user      # current user
+./install.sh -system    # all users (requires sudo)
+```
+
+The installer detects Debian's multiarch VLC directory, so no manual path
+editing is needed.
+
 ## Usage 
 
 ![GUI](https://i.imgur.com/Q2fZT07.png)
