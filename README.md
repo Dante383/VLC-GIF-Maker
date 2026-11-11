@@ -43,11 +43,12 @@ never added twice.
 Now, you can either input start and end timestamps by hand, or you can simply navigate the player 
 and click "Get" by the inputs. The timestamps will be set automatically. 
 
-Hand-written timestamps accept `SS`, `MM:SS` and `HH:MM:SS`, with an optional
-fractional part (`.` or `,`) - e.g. `12`, `1:23`, `1:02:03.456`. Leaving the
-start time empty uses the beginning of the video; leaving the end time empty
-uses the current playback position. The parsed times are normalised before
-ffmpeg runs.
+Hand-written timestamps accept `SS`, `MM:SS` and `H:MM:SS`/`HH:MM:SS`, with
+an optional fractional part (`.` or `,`) - e.g. `12`, `12.5`, `.5`, `1:23`,
+`1:23.5`, `1:02:03.456`. Components may exceed 59 and are summed, so `84:22`
+means 1:24:22. Leaving the start time empty uses the beginning of the video;
+leaving the end time empty uses the current playback position. The parsed
+times are normalised before ffmpeg runs.
 
 FPS, looping, the command and the output path are remembered across restarts.
 Use "Save settings" to store them immediately, or just generate a GIF / close
@@ -72,7 +73,13 @@ fixes a few issues:
   value loaded when the dialog opened.
 - "Set to default" is now "Restore to default", which actually resets the
   command.
-- Start/end timestamps are parsed and normalised (`SS`, `MM:SS`, `HH:MM:SS`).
+- Input paths are URL-decoded (`%20` etc.) and quoted automatically, so media
+  paths containing spaces work even from an older hand-edited command.
+- Hardcoded `fps=` / `-loop` values in an old command are migrated to
+  `{fps}` / `{loop}`, so the FPS and looping controls apply again.
+- Start/end timestamps accept `SS`, `MM:SS` and `H:MM:SS` (with optional
+  fractional seconds), and out-of-range components are summed instead of
+  rejected (`84:22` = 1:24:22).
 - A trailing slash on the output path no longer produces `//`.
 - `.gif` is added only when the filename does not already have it, and other
   dots in the name are preserved.

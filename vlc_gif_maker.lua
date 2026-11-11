@@ -16,7 +16,7 @@ Patched fork: https://github.com/Ron-RONZZ-org/VLC-GIF-Maker
 --------------------------------------------
 --]]----------------------------------------
 
-default_command = 'ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i "{input_file}" -vf "fps={fps},scale=498:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop {loop} "{output_path}/{output_filename}.gif"'
+default_command = 'ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_file} -vf "fps={fps},scale=498:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop {loop} "{output_path}/{output_filename}.gif"'
 default_fps = "15"
 default_looping = 0
 default_resolution = "498w"
@@ -84,13 +84,25 @@ end
 -- "{output_path}{output_filename}" produce a valid path.
 function migrate_command(template)
     if template == nil then return template end
-    return (template:gsub("{output_path}[/\\]*{output_filename}",
-                          "{output_path}/{output_filename}"))
+    template = template:gsub("{output_path}[/\\]*{output_filename}",
+                             "{output_path}/{output_filename}")
+    -- Input paths are quoted when placeholders are substituted, so drop any
+    -- quotes the old command may already carry around {input_file}.
+    template = template:gsub("[\"']?{input_file}[\"']?", "{input_file}")
+    -- Let the FPS and looping controls drive commands that hardcoded values.
+    template = template:gsub("fps=%d+%.?%d*", "fps={fps}")
+    template = template:gsub("%-loop%s+%-?%d+", "-loop {loop}")
+    return template
 end
 
--- Accepts "SS", "MM:SS" and "HH:MM:SS", with an optional fractional part
--- separated by "." or ",". Returns a normalized "H:MM:SS.mmm" string and the
--- value in seconds, or nil and an error message.
+-- Accepts "SS", "MM:SS" and "H:MM:SS", each with an optional fractional part
+-- separated by "." or ",". Components may exceed their conventional range and
+-- are summed, so "84:22" means 84 minutes 22 seconds. Returns a normalized
+-- "H:MM:SS.mmm" string and the value in seconds, or nil and an error message.
+function valid_nonnegative(value)
+    return value ~= nil and value == value and value ~= math.huge and value >= 0
+end
+
 function parse_timestamp(text)
     text = trim(text)
     if text == "" then
@@ -106,30 +118,28 @@ function parse_timestamp(text)
     local seconds
     if #parts == 1 then
         local value = tonumber(parts[1])
-        if value == nil or value < 0 then
+        if not valid_nonnegative(value) then
             return nil, "invalid seconds"
         end
         seconds = value
     elseif #parts == 2 then
         local minutes = tonumber(parts[1])
         local secs = tonumber(parts[2])
-        if minutes == nil or secs == nil
-           or minutes < 0 or secs < 0 or minutes >= 60 or secs >= 60 then
-            return nil, "minutes and seconds must be between 0 and 59"
+        if not valid_nonnegative(minutes) or not valid_nonnegative(secs) then
+            return nil, "invalid MM:SS value"
         end
         seconds = minutes * 60 + secs
     elseif #parts == 3 then
         local hours = tonumber(parts[1])
         local minutes = tonumber(parts[2])
         local secs = tonumber(parts[3])
-        if hours == nil or minutes == nil or secs == nil
-           or hours < 0 or minutes < 0 or secs < 0
-           or minutes >= 60 or secs >= 60 then
-            return nil, "expected HH:MM:SS"
+        if not valid_nonnegative(hours) or not valid_nonnegative(minutes)
+           or not valid_nonnegative(secs) then
+            return nil, "invalid H:MM:SS value"
         end
         seconds = hours * 3600 + minutes * 60 + secs
     else
-        return nil, "expected SS, MM:SS or HH:MM:SS"
+        return nil, "expected SS, MM:SS or H:MM:SS"
     end
 
     local whole = math.floor(seconds)
@@ -476,7 +486,7 @@ function generate_gif()
     local values = {
         start_timestamp = start_timestamp,
         stop_timestamp = stop_timestamp,
-        input_file = media_path,
+        input_file = '"' .. media_path .. '"',
         output_path = strip_trailing_separators(current_output_path),
         output_filename = output_filename,
         fps = current_fps,
@@ -531,7 +541,7 @@ end
 function descriptor()
     return {
         title = "VLC GIF maker";
-        version = "0.0.7";
+        version = "0.0.8";
         author = "Piotr Zdolski";
         url = "https://github.com/Dante383/VLC_GIF_Maker";
         description = [[
