@@ -103,12 +103,40 @@ function valid_nonnegative(value)
     return value ~= nil and value == value and value ~= math.huge and value >= 0
 end
 
+-- Locale-independent decimal parser. Lua's tonumber() follows the C locale, so
+-- "06.500" is nil when LC_NUMERIC uses a comma (e.g. eo.UTF-8, fr_FR.UTF-8).
+-- Only digit-only substrings are handed to tonumber(), which is safe in any
+-- locale; the fraction is then divided in manually.
+function parse_number(text)
+    text = trim(text)
+    if text == "" then
+        return nil
+    end
+    if text:sub(1, 1) == "+" then
+        text = text:sub(2)
+    end
+    text = text:gsub(",", ".")
+
+    local whole, fraction = text:match("^(%d*)%.?(%d*)$")
+    if whole == nil or (whole == "" and fraction == "") then
+        return nil
+    end
+
+    local value = 0
+    if whole ~= "" then
+        value = tonumber(whole)
+    end
+    if fraction ~= "" then
+        value = value + tonumber(fraction) / (10 ^ #fraction)
+    end
+    return value
+end
+
 function parse_timestamp(text)
     text = trim(text)
     if text == "" then
         return nil, "empty timestamp"
     end
-    text = text:gsub(",", ".")
 
     local parts = {}
     for part in text:gmatch("[^:]+") do
@@ -117,22 +145,22 @@ function parse_timestamp(text)
 
     local seconds
     if #parts == 1 then
-        local value = tonumber(parts[1])
+        local value = parse_number(parts[1])
         if not valid_nonnegative(value) then
             return nil, "invalid seconds"
         end
         seconds = value
     elseif #parts == 2 then
-        local minutes = tonumber(parts[1])
-        local secs = tonumber(parts[2])
+        local minutes = parse_number(parts[1])
+        local secs = parse_number(parts[2])
         if not valid_nonnegative(minutes) or not valid_nonnegative(secs) then
             return nil, "invalid MM:SS value"
         end
         seconds = minutes * 60 + secs
     elseif #parts == 3 then
-        local hours = tonumber(parts[1])
-        local minutes = tonumber(parts[2])
-        local secs = tonumber(parts[3])
+        local hours = parse_number(parts[1])
+        local minutes = parse_number(parts[2])
+        local secs = parse_number(parts[3])
         if not valid_nonnegative(hours) or not valid_nonnegative(minutes)
            or not valid_nonnegative(secs) then
             return nil, "invalid H:MM:SS value"
@@ -319,7 +347,6 @@ function gui_create_main_dialog(template, path, saved_fps, saved_looping, saved_
             resolution_input:add_value(preset.label, id)
         end
     end
-    dialog_resolution_id = selected_resolution
 
     -- middle
     dlg:add_button("Generate GIF", generate_gif, 3, 9, 3, 2)
@@ -444,22 +471,19 @@ function generate_gif()
         current_fps = default_fps
     end
 
-    -- Only rewrite the command when the user actually picks another
-    -- resolution, so a hand-edited scale= filter is left alone otherwise.
+    -- The dropdown is the source of truth for the output size; rewrite the
+    -- command's scale= filter so the saved preset always applies.
     local selected_resolution = resolution_input:get_value()
-    if selected_resolution ~= dialog_resolution_id then
-        local preset = resolution_presets[selected_resolution]
-        if preset then
-            local rewritten, replaced = apply_resolution(template, preset.scale)
-            if replaced then
-                template = rewritten
-                command_input:set_text(template)
-                save_config('command', template)
-            else
-                vlc.msg.warn("GIF Maker: command has no scale= filter; resolution setting ignored")
-            end
+    local preset = resolution_presets[selected_resolution]
+    if preset then
+        local rewritten, replaced = apply_resolution(template, preset.scale)
+        if replaced then
+            template = rewritten
+            command_input:set_text(template)
+            save_config('command', template)
+        else
+            vlc.msg.warn("GIF Maker: command has no scale= filter; resolution setting ignored")
         end
-        dialog_resolution_id = selected_resolution
     end
 
     local uri = item:uri()
@@ -541,7 +565,7 @@ end
 function descriptor()
     return {
         title = "VLC GIF maker";
-        version = "0.0.8";
+        version = "0.0.9";
         author = "Piotr Zdolski";
         url = "https://github.com/Dante383/VLC_GIF_Maker";
         description = [[
@@ -593,7 +617,6 @@ function close()
     fps_input = nil
     looping_input = nil
     resolution_input = nil
-    dialog_resolution_id = nil
 
     if ffmpegDlg then
         ffmpegDlg:delete()
