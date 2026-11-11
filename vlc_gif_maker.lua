@@ -11,67 +11,274 @@ suitable to your operating system:
 * Mac OS X (current user): /Users/%your_name%/Library/Application Support/org.videolan.vlc/lua/extensions/
 --------------------------------------------
 To open GIF Maker: View > VLC Gif Maker
+
+Patched fork: https://github.com/Ron-RONZZ-org/VLC-GIF-Maker
+--------------------------------------------
 --]]----------------------------------------
 
-default_command = 'ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i "{input_file}" -vf "fps={fps},scale=498:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop {loop} "{output_path}/{output_filename}.gif"'
+default_command = 'ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i {input_file} -vf "fps={fps},scale=498:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop {loop} "{output_path}/{output_filename}.gif"'
+default_fps = "15"
+default_looping = 0
+default_resolution = "498w"
+
+-- Resolution presets are applied to the scale= filter of the command. The
+-- default matches the bundled command (498 px wide) so existing behaviour is
+-- preserved until the user picks something else.
+resolution_presets = {
+    { key = "original", label = "Original (no scaling)", scale = "iw:ih" },
+    { key = "498w",     label = "498 px wide (default)", scale = "498:-1" },
+    { key = "144p",     label = "144p", scale = "-2:144" },
+    { key = "240p",     label = "240p", scale = "-2:240" },
+    { key = "360p",     label = "360p", scale = "-2:360" },
+    { key = "480p",     label = "480p", scale = "-2:480" },
+    { key = "720p",     label = "720p", scale = "-2:720" },
+    { key = "1080p",    label = "1080p", scale = "-2:1080" },
+}
+
 command = false
 output_path = false
+fps = default_fps
+looping = default_looping
+resolution = default_resolution
 
-function string_replace(target, substring, replacement, n)
-    return (target:gsub(substring:gsub("%p", "%%%0"), replacement:gsub("%%", "%%%%"), n))
+function config_path(filename)
+    return vlc.config.configdir() .. "/gif_maker_" .. filename
 end
 
-function get_timestamp()
-    local microseconds = vlc.var.get(vlc.object.input(), "time")
-    local seconds_total = math.floor((microseconds/1000)/1000)
+function load_config(filename, fallback)
+    local file = io.open(config_path(filename), "r")
+    if file == nil then
+        save_config(filename, fallback)
+        return fallback
+    end
 
-    local hours = math.floor((seconds_total % 86400)/3600)
-    local minutes = math.floor((seconds_total % 3600)/60)
-    local seconds = math.floor((seconds_total % 60))
-    local miliseconds = math.floor((microseconds % 1000))
+    local value = file:read("*l")
+    file:close()
 
-    -- format() seems to not be supported :(
-    return hours .. ":" .. minutes .. ":" .. seconds .. "." .. miliseconds
-end
-
--- seperate file for path so there are no issues and weird gimmicks with multi-line commands
--- this is a simple project after all, not nginx 
-function load_config(filename)
-    local config_path = vlc.config.configdir() .. "/gif_maker_" .. filename
-
-    local config_file, err = io.open(config_path, "r")
-    
-    if config_file == nil then
-        if filename == 'command' then 
-            value = default_command
-        elseif filename == 'output_path' then 
-            value = vlc.config.homedir()
-        end
-        save_config(filename, value)
-        return value
-    end 
-
-    value = config_file:read()
-    config_file:close()
-
-    if not value or value == "" then
-        if filename == 'command' then 
-            value = default_command
-        elseif filename == 'output_path' then 
-            value = vlc.config.homedir()
-        end
-        save_config(filename, value)
+    if value == nil or value == "" then
+        save_config(filename, fallback)
+        return fallback
     end
 
     return value
 end
 
 function save_config(filename, value)
-    config_path = vlc.config.configdir() .. "/gif_maker_" .. filename
-
-    local file = assert(io.open(config_path, 'w+b'), 'Error while saving the ' .. filename)
-    file:write(value)
+    local file, err = io.open(config_path(filename), "w+b")
+    if file == nil then
+        vlc.msg.err("GIF Maker: could not save " .. filename .. ": " .. tostring(err))
+        return false
+    end
+    file:write(tostring(value))
     file:close()
+    return true
+end
+
+function trim(text)
+    if text == nil then return "" end
+    return (text:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+-- Collapse zero or more separators between the output path and the filename
+-- placeholders, so both "{output_path}/{output_filename}" and the older
+-- "{output_path}{output_filename}" produce a valid path.
+function migrate_command(template)
+    if template == nil then return template end
+    template = template:gsub("{output_path}[/\\]*{output_filename}",
+                             "{output_path}/{output_filename}")
+    -- Input paths are quoted when placeholders are substituted, so drop any
+    -- quotes the old command may already carry around {input_file}.
+    template = template:gsub("[\"']?{input_file}[\"']?", "{input_file}")
+    -- Let the FPS and looping controls drive commands that hardcoded values.
+    template = template:gsub("fps=%d+%.?%d*", "fps={fps}")
+    template = template:gsub("%-loop%s+%-?%d+", "-loop {loop}")
+    return template
+end
+
+-- Accepts "SS", "MM:SS" and "H:MM:SS", each with an optional fractional part
+-- separated by "." or ",". Components may exceed their conventional range and
+-- are summed, so "84:22" means 84 minutes 22 seconds. Returns a normalized
+-- "H:MM:SS.mmm" string and the value in seconds, or nil and an error message.
+function valid_nonnegative(value)
+    return value ~= nil and value == value and value ~= math.huge and value >= 0
+end
+
+-- Locale-independent decimal parser. Lua's tonumber() follows the C locale, so
+-- "06.500" is nil when LC_NUMERIC uses a comma (e.g. eo.UTF-8, fr_FR.UTF-8).
+-- Only digit-only substrings are handed to tonumber(), which is safe in any
+-- locale; the fraction is then divided in manually.
+function parse_number(text)
+    text = trim(text)
+    if text == "" then
+        return nil
+    end
+    if text:sub(1, 1) == "+" then
+        text = text:sub(2)
+    end
+    text = text:gsub(",", ".")
+
+    local whole, fraction = text:match("^(%d*)%.?(%d*)$")
+    if whole == nil or (whole == "" and fraction == "") then
+        return nil
+    end
+
+    local value = 0
+    if whole ~= "" then
+        value = tonumber(whole)
+    end
+    if fraction ~= "" then
+        value = value + tonumber(fraction) / (10 ^ #fraction)
+    end
+    return value
+end
+
+function parse_timestamp(text)
+    text = trim(text)
+    if text == "" then
+        return nil, "empty timestamp"
+    end
+
+    local parts = {}
+    for part in text:gmatch("[^:]+") do
+        parts[#parts + 1] = part
+    end
+
+    local seconds
+    if #parts == 1 then
+        local value = parse_number(parts[1])
+        if not valid_nonnegative(value) then
+            return nil, "invalid seconds"
+        end
+        seconds = value
+    elseif #parts == 2 then
+        local minutes = parse_number(parts[1])
+        local secs = parse_number(parts[2])
+        if not valid_nonnegative(minutes) or not valid_nonnegative(secs) then
+            return nil, "invalid MM:SS value"
+        end
+        seconds = minutes * 60 + secs
+    elseif #parts == 3 then
+        local hours = parse_number(parts[1])
+        local minutes = parse_number(parts[2])
+        local secs = parse_number(parts[3])
+        if not valid_nonnegative(hours) or not valid_nonnegative(minutes)
+           or not valid_nonnegative(secs) then
+            return nil, "invalid H:MM:SS value"
+        end
+        seconds = hours * 3600 + minutes * 60 + secs
+    else
+        return nil, "expected SS, MM:SS or H:MM:SS"
+    end
+
+    local whole = math.floor(seconds)
+    local millis = math.floor((seconds - whole) * 1000 + 0.5)
+    if millis >= 1000 then
+        whole = whole + 1
+        millis = millis - 1000
+    end
+
+    local hours = math.floor(whole / 3600)
+    local minutes = math.floor((whole % 3600) / 60)
+    local secs = whole % 60
+
+    return string.format("%d:%02d:%02d.%03d", hours, minutes, secs, millis), seconds
+end
+
+function get_timestamp()
+    local input = vlc.object.input()
+    if input == nil then
+        return string.format("%d:%02d:%02d.%03d", 0, 0, 0, 0)
+    end
+
+    local microseconds = vlc.var.get(input, "time") or 0
+    local seconds_total = math.floor(microseconds / 1000000)
+    local hours = math.floor((seconds_total % 86400) / 3600)
+    local minutes = math.floor((seconds_total % 3600) / 60)
+    local seconds = seconds_total % 60
+    local milliseconds = math.floor((microseconds / 1000) % 1000)
+
+    return string.format("%d:%02d:%02d.%03d", hours, minutes, seconds, milliseconds)
+end
+
+function strip_trailing_separators(path)
+    if path == nil then return "" end
+    return (path:gsub("[/\\]+$", ""))
+end
+
+function output_file_for(path, filename)
+    return strip_trailing_separators(path) .. "/" .. filename .. ".gif"
+end
+
+-- Keep everything except a trailing .gif, so "my.video" stays "my.video".
+function sanitize_filename(name)
+    name = trim(name)
+    if name == "" then
+        return "g" .. os.time()
+    end
+    name = name:gsub("%.[gG][iI][fF]$", "")
+    if name == "" then
+        return "g" .. os.time()
+    end
+    return name
+end
+
+function url_decode(text)
+    return (text:gsub("%%(%x%x)", function(hex)
+        return string.char(tonumber(hex, 16))
+    end))
+end
+
+function resolution_id_for(key)
+    for id, preset in ipairs(resolution_presets) do
+        if preset.key == key then
+            return id
+        end
+    end
+    return 1
+end
+
+-- Replace the width/height part of the first scale= filter, keeping any
+-- options such as :flags=lanczos. Handles both "scale=498:-1:flags=lanczos"
+-- and "scale=flags=lanczos".
+function apply_resolution(command, scale)
+    local replaced = false
+    local result = command:gsub("([^%w_])scale=([^,]*)", function(prefix, args)
+        local tokens = {}
+        for token in args:gmatch("[^:]+") do
+            tokens[#tokens + 1] = token
+        end
+
+        local first_option = #tokens + 1
+        for i, token in ipairs(tokens) do
+            if token:find("=", 1, true) then
+                first_option = i
+                break
+            end
+        end
+
+        local rebuilt = prefix .. "scale=" .. scale
+        for i = first_option, #tokens do
+            rebuilt = rebuilt .. ":" .. tokens[i]
+        end
+
+        replaced = true
+        return rebuilt
+    end, 1)
+
+    return result, replaced
+end
+
+function execute_succeeded(ok)
+    -- Lua 5.1 returns an exit status number; Lua 5.2+ returns true/nil.
+    if type(ok) == "number" then
+        return ok == 0
+    end
+    return ok == true
+end
+
+function fail(message)
+    vlc.msg.err("GIF Maker: " .. message)
+    vlc.osd.message(message, 1, "top", 5000000)
 end
 
 function gui_create_ffmpeg_warning()
@@ -82,9 +289,7 @@ function gui_create_ffmpeg_warning()
     ffmpegDlg:add_button("OK", startExtension, 1, 2)
 end
 
-function gui_create_main_dialog(command, output_path)
-    local input = vlc.object.input()
-
+function gui_create_main_dialog(template, path, saved_fps, saved_looping, saved_resolution)
     dlg = vlc.dialog("GIF Maker")
     -- left side
 
@@ -98,43 +303,52 @@ function gui_create_main_dialog(command, output_path)
     dlg:add_button("Get", fill_stop_timestamp, 3, 2)
 
     dlg:add_label("GIFs output path:", 1, 3)
-    output_path_input = dlg:add_text_input(output_path, 1, 4, 3)
+    output_path_input = dlg:add_text_input(path, 1, 4, 3)
 
     dlg:add_label("Filename (leave empty to randomly generate):", 1, 5)
     output_filename_input = dlg:add_text_input('', 1, 6, 3)
 
     -- right side
-    
+
     separator_string = '|<br/>'
     for var=0,17 do
         separator_string = separator_string .. '|<br/>'
-    end 
+    end
 
     dlg:add_label("<div style='color:#000; line-height:80%;'>" .. separator_string .. "</div>", 4, 1, 1, 8)
 
     dlg:add_label("<b>Advanced settings:</b>", 6, 1)
 
     dlg:add_label("Command to execute:", 5, 2, 2)
-    dlg:add_button("Set to default", set_default_command, 7, 2)
-    command_input = dlg:add_text_input(command, 5, 3, 3)
+    dlg:add_button("Restore to default", restore_default_command, 7, 2)
+    command_input = dlg:add_text_input(template, 5, 3, 2)
+    dlg:add_button("Save settings", save_settings, 7, 3)
 
     dlg:add_label("FPS", 5, 4, 1)
-    fps_input = dlg:add_text_input("15", 5, 5, 1)
+    fps_input = dlg:add_text_input(tostring(saved_fps), 5, 5, 1)
 
     dlg:add_label("Looping", 6, 4, 1)
     looping_input = dlg:add_dropdown(6, 5, 1)
-    looping_input:add_value("Loop GIF", 0)
-    looping_input:add_value("Only play once", -1)
+    -- The first value added is selected, so respect the saved setting.
+    if saved_looping == -1 then
+        looping_input:add_value("Only play once", -1)
+        looping_input:add_value("Loop GIF", 0)
+    else
+        looping_input:add_value("Loop GIF", 0)
+        looping_input:add_value("Only play once", -1)
+    end
 
-   --[[dlg:add_label("Resolution", 7, 4, 1)
+    dlg:add_label("Resolution", 7, 4, 1)
     resolution_input = dlg:add_dropdown(7, 5, 1)
-    resolution_input:add_value("498px x height", 1) 
-    resolution_input:add_value("Don't scale (input video resolution)", 2)
-    resolution_input:add_value("Set height in pixels:", 3)
-    resolution_input:add_value("Set width in pixels:", 4)
-    resolution_input:add_value("Set height and width in pixels:", 5)]]
+    local selected_resolution = resolution_id_for(saved_resolution)
+    resolution_input:add_value(resolution_presets[selected_resolution].label, selected_resolution)
+    for id, preset in ipairs(resolution_presets) do
+        if id ~= selected_resolution then
+            resolution_input:add_value(preset.label, id)
+        end
+    end
 
-    -- middle 
+    -- middle
     dlg:add_button("Generate GIF", generate_gif, 3, 9, 3, 2)
 end
 
@@ -146,88 +360,204 @@ function fill_stop_timestamp()
     stop_timestamp_input:set_text(get_timestamp())
 end
 
-function generateCommand(command, generalOptions, commandBuilder)
-    for optionName,optionValue in pairs(generalOptions) do 
-        if vlc.win and string.sub(optionValue, 1,1) == '/' then optionValue = string.sub(optionValue, 2, -1) end
-        command = string_replace(command, optionName, tostring(optionValue))
-    end
+-- Replace every {placeholder} in one pass, so the result does not depend on
+-- table iteration order and values containing pattern characters are safe.
+function generate_command(template, values)
+    local result = template:gsub("{([%w_]+)}", function(name)
+        local value = values[name]
+        if value == nil then
+            vlc.msg.warn("GIF Maker: unknown placeholder {" .. name .. "}")
+            return "{" .. name .. "}"
+        end
+        return tostring(value)
+    end)
 
-    if commandBuilder then 
-        return generateCommand(command, commandBuilder)
+    if vlc.win then
+        result = result:gsub("/", "\\")
     end
-    
-    command = string.gsub(command, '\\', '\\')
-    if vlc.win then command = string_replace(command, '/', '\\') end
-    command = string_replace(command, '%5B', '[')
-    command = string_replace(command, '%5D', ']')
-    vlc.msg.info(command)
-    return command
+    return result
+end
+
+-- Widget access is guarded: deactivate() may run while VLC is tearing the
+-- dialog down, where a stale widget would otherwise raise a Lua error.
+function widget_text(widget)
+    if widget == nil then return nil end
+    local ok, text = pcall(function() return widget:get_text() end)
+    if ok then return text end
+    return nil
+end
+
+function widget_value(widget)
+    if widget == nil then return nil end
+    local ok, value = pcall(function() return widget:get_value() end)
+    if ok then return value end
+    return nil
+end
+
+function save_current_settings()
+    local text = widget_text(command_input)
+    if text then
+        save_config('command', text)
+    end
+    text = widget_text(output_path_input)
+    if text then
+        save_config('output_path', text)
+    end
+    text = widget_text(fps_input)
+    if text then
+        save_config('fps', text)
+    end
+    local loop = widget_value(looping_input)
+    if loop ~= nil then
+        save_config('looping', tostring(loop))
+    end
+    local selected = widget_value(resolution_input)
+    if selected ~= nil then
+        local preset = resolution_presets[selected]
+        if preset then
+            save_config('resolution', preset.key)
+        end
+    end
+end
+
+function save_settings()
+    save_current_settings()
+    vlc.osd.message("Settings saved.", 1, "top", 2000000)
+end
+
+function restore_default_command()
+    command_input:set_text(default_command)
+    save_config('command', default_command)
+    vlc.osd.message("Command restored to default.", 1, "top", 2000000)
 end
 
 function generate_gif()
-    local start_timestamp = start_timestamp_input:get_text()
-    local stop_timestamp = stop_timestamp_input:get_text()
-    local command = command_input:get_text()
-    local fps = fps_input:get_text()
-
     local item = vlc.input.item()
+    if item == nil then
+        fail("No media is playing.")
+        return
+    end
+
+    local start_text = trim(start_timestamp_input:get_text())
+    local stop_text = trim(stop_timestamp_input:get_text())
+
+    if start_text == "" then
+        start_text = "0"
+    end
+    if stop_text == "" then
+        stop_text = get_timestamp()
+    end
+
+    local start_timestamp, start_seconds = parse_timestamp(start_text)
+    if start_timestamp == nil then
+        fail("Invalid start time: " .. tostring(start_seconds))
+        return
+    end
+
+    local stop_timestamp, stop_seconds = parse_timestamp(stop_text)
+    if stop_timestamp == nil then
+        fail("Invalid end time: " .. tostring(stop_seconds))
+        return
+    end
+
+    if stop_seconds <= start_seconds then
+        fail("End time must be after start time.")
+        return
+    end
+
+    local template = command_input:get_text()
+    local current_fps = trim(fps_input:get_text())
+    if current_fps == "" then
+        current_fps = default_fps
+    end
+
+    -- The dropdown is the source of truth for the output size; rewrite the
+    -- command's scale= filter so the saved preset always applies.
+    local selected_resolution = resolution_input:get_value()
+    local preset = resolution_presets[selected_resolution]
+    if preset then
+        local rewritten, replaced = apply_resolution(template, preset.scale)
+        if replaced then
+            template = rewritten
+            command_input:set_text(template)
+            save_config('command', template)
+        else
+            vlc.msg.warn("GIF Maker: command has no scale= filter; resolution setting ignored")
+        end
+    end
+
     local uri = item:uri()
     local media_path
     if vlc.win then
-        media_path = string.gsub(uri, '^file:///', '') 
-    else 
-        media_path = string.gsub(uri, '^file://', '')
-    end
-    local output_path = output_path_input:get_text()
-    local output_filename = output_filename_input:get_text()
-
-    if output_filename == '' then
-        output_filename = 'g' .. os.time()
+        media_path = uri:gsub("^file:///", "")
     else
-        output_filename = output_filename:match('([^.]+)') -- remove extension
+        media_path = uri:gsub("^file://", "")
     end
-    
-    save_config('command', command)
-    save_config('output_path', output_path)
+    media_path = url_decode(media_path)
 
-    local generalOptions = {}
-    generalOptions['{start_timestamp}'] = start_timestamp
-    generalOptions['{stop_timestamp}'] = stop_timestamp
-    generalOptions['{input_file}'] = media_path
-    generalOptions['{output_path}'] = output_path
-    generalOptions['{output_filename}'] = output_filename
+    local current_output_path = trim(output_path_input:get_text())
+    if current_output_path == "" then
+        fail("Set an output path first.")
+        return
+    end
 
-    local commandBuilder = {}
-    commandBuilder['{fps}'] = fps
-    commandBuilder['{loop}'] = looping_input:get_value()
+    local output_filename = sanitize_filename(output_filename_input:get_text())
+    local output_file = output_file_for(current_output_path, output_filename)
+    local loop_value = looping_input:get_value()
 
-    command = generateCommand(command, generalOptions, commandBuilder)
-    
-    os.execute(command)
-    vlc.osd.message("GIF created! Saved to " .. output_path .. "/" .. output_filename, 1, "top", 3000000) -- why, tf, is vlc's osd msg duration in MICROseconds??
-end
+    save_current_settings()
 
-function set_default_command()
-    command_input:set_text(default_command)
-    save_config('command', default_command)
+    local values = {
+        start_timestamp = start_timestamp,
+        stop_timestamp = stop_timestamp,
+        input_file = '"' .. media_path .. '"',
+        output_path = strip_trailing_separators(current_output_path),
+        output_filename = output_filename,
+        fps = current_fps,
+        loop = loop_value,
+        looping = loop_value,
+    }
+
+    local generated = generate_command(template, values)
+    vlc.msg.info("GIF Maker command: " .. generated)
+
+    local ok, how, code = os.execute(generated)
+    if not execute_succeeded(ok) then
+        save_config('last_command', generated)
+        fail("GIF creation failed (exit " .. tostring(code) .. "). Details: " .. config_path("last_command"))
+        return
+    end
+
+    -- Only verify the file when the command actually writes to the expected
+    -- location; custom commands may produce a different output file.
+    if generated:find(output_file, 1, true) then
+        local file = io.open(output_file, "rb")
+        if file == nil then
+            save_config('last_command', generated)
+            fail("ffmpeg finished but " .. output_file .. " was not created. Details: " .. config_path("last_command"))
+            return
+        end
+        file:close()
+    end
+
+    vlc.osd.message("GIF created! Saved to " .. output_file, 1, "top", 3000000)
 end
 
 function check_ffmpeg_status()
-    status_code = os.execute("ffmpeg -version")
-    if status_code then
-        startExtension(command, output_path)
-    else 
+    local status = os.execute("ffmpeg -version")
+    if execute_succeeded(status) then
+        startExtension()
+    else
         gui_create_ffmpeg_warning()
     end
 end
 
 function startExtension()
-    if ffmpegDlg then 
+    if ffmpegDlg then
         ffmpegDlg:delete()
-        ffmpegDlg = nil 
-        startExtension()
+        ffmpegDlg = nil
     end
-    gui_create_main_dialog(command, output_path)
+    gui_create_main_dialog(command, output_path, fps, looping, resolution)
 end
 
 -- functions below are called by VLC
@@ -235,7 +565,7 @@ end
 function descriptor()
     return {
         title = "VLC GIF maker";
-        version = "0.0.5";
+        version = "0.0.9";
         author = "Piotr Zdolski";
         url = "https://github.com/Dante383/VLC_GIF_Maker";
         description = [[
@@ -247,32 +577,50 @@ end
 
 
 function activate()
-    command = load_config('command')
-    output_path = load_config('output_path')
+    local loaded = load_config('command', default_command)
+    local migrated = migrate_command(loaded)
+    if migrated ~= loaded then
+        save_config('command', migrated)
+    end
+    command = migrated
+    output_path = load_config('output_path', vlc.config.homedir())
+    fps = load_config('fps', default_fps)
+    looping = tonumber(load_config('looping', tostring(default_looping))) or default_looping
+    resolution = load_config('resolution', default_resolution)
 
     -- is ffmpeg even used in the current command?
     if string.find(command, "ffmpeg") then
         check_ffmpeg_status()
-    else 
+    else
         startExtension()
     end
 end
 
 
 function deactivate()
-    save_config('command', command)
+    save_current_settings()
 end
 
 
 function close()
+    save_current_settings()
+
     if dlg then
         dlg:delete()
         dlg = nil
     end
-    if ffmpegDlg then 
+    start_timestamp_input = nil
+    stop_timestamp_input = nil
+    output_path_input = nil
+    output_filename_input = nil
+    command_input = nil
+    fps_input = nil
+    looping_input = nil
+    resolution_input = nil
+
+    if ffmpegDlg then
         ffmpegDlg:delete()
-        ffmpegDlg = nil 
-        startExtension()
+        ffmpegDlg = nil
     end
 end
 
