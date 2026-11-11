@@ -19,11 +19,27 @@ Patched fork: https://github.com/Ron-RONZZ-org/VLC-GIF-Maker
 default_command = 'ffmpeg -ss {start_timestamp} -to {stop_timestamp} -i "{input_file}" -vf "fps={fps},scale=498:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop {loop} "{output_path}/{output_filename}.gif"'
 default_fps = "15"
 default_looping = 0
+default_resolution = "498w"
+
+-- Resolution presets are applied to the scale= filter of the command. The
+-- default matches the bundled command (498 px wide) so existing behaviour is
+-- preserved until the user picks something else.
+resolution_presets = {
+    { key = "original", label = "Original (no scaling)", scale = "iw:ih" },
+    { key = "498w",     label = "498 px wide (default)", scale = "498:-1" },
+    { key = "144p",     label = "144p", scale = "-2:144" },
+    { key = "240p",     label = "240p", scale = "-2:240" },
+    { key = "360p",     label = "360p", scale = "-2:360" },
+    { key = "480p",     label = "480p", scale = "-2:480" },
+    { key = "720p",     label = "720p", scale = "-2:720" },
+    { key = "1080p",    label = "1080p", scale = "-2:1080" },
+}
 
 command = false
 output_path = false
 fps = default_fps
 looping = default_looping
+resolution = default_resolution
 
 function config_path(filename)
     return vlc.config.configdir() .. "/gif_maker_" .. filename
@@ -174,6 +190,46 @@ function url_decode(text)
     end))
 end
 
+function resolution_id_for(key)
+    for id, preset in ipairs(resolution_presets) do
+        if preset.key == key then
+            return id
+        end
+    end
+    return 1
+end
+
+-- Replace the width/height part of the first scale= filter, keeping any
+-- options such as :flags=lanczos. Handles both "scale=498:-1:flags=lanczos"
+-- and "scale=flags=lanczos".
+function apply_resolution(command, scale)
+    local replaced = false
+    local result = command:gsub("([^%w_])scale=([^,]*)", function(prefix, args)
+        local tokens = {}
+        for token in args:gmatch("[^:]+") do
+            tokens[#tokens + 1] = token
+        end
+
+        local first_option = #tokens + 1
+        for i, token in ipairs(tokens) do
+            if token:find("=", 1, true) then
+                first_option = i
+                break
+            end
+        end
+
+        local rebuilt = prefix .. "scale=" .. scale
+        for i = first_option, #tokens do
+            rebuilt = rebuilt .. ":" .. tokens[i]
+        end
+
+        replaced = true
+        return rebuilt
+    end, 1)
+
+    return result, replaced
+end
+
 function execute_succeeded(ok)
     -- Lua 5.1 returns an exit status number; Lua 5.2+ returns true/nil.
     if type(ok) == "number" then
@@ -195,7 +251,7 @@ function gui_create_ffmpeg_warning()
     ffmpegDlg:add_button("OK", startExtension, 1, 2)
 end
 
-function gui_create_main_dialog(template, path, saved_fps, saved_looping)
+function gui_create_main_dialog(template, path, saved_fps, saved_looping, saved_resolution)
     dlg = vlc.dialog("GIF Maker")
     -- left side
 
@@ -243,6 +299,17 @@ function gui_create_main_dialog(template, path, saved_fps, saved_looping)
         looping_input:add_value("Loop GIF", 0)
         looping_input:add_value("Only play once", -1)
     end
+
+    dlg:add_label("Resolution", 7, 4, 1)
+    resolution_input = dlg:add_dropdown(7, 5, 1)
+    local selected_resolution = resolution_id_for(saved_resolution)
+    resolution_input:add_value(resolution_presets[selected_resolution].label, selected_resolution)
+    for id, preset in ipairs(resolution_presets) do
+        if id ~= selected_resolution then
+            resolution_input:add_value(preset.label, id)
+        end
+    end
+    dialog_resolution_id = selected_resolution
 
     -- middle
     dlg:add_button("Generate GIF", generate_gif, 3, 9, 3, 2)
@@ -307,6 +374,13 @@ function save_current_settings()
     if loop ~= nil then
         save_config('looping', tostring(loop))
     end
+    local selected = widget_value(resolution_input)
+    if selected ~= nil then
+        local preset = resolution_presets[selected]
+        if preset then
+            save_config('resolution', preset.key)
+        end
+    end
 end
 
 function save_settings()
@@ -358,6 +432,24 @@ function generate_gif()
     local current_fps = trim(fps_input:get_text())
     if current_fps == "" then
         current_fps = default_fps
+    end
+
+    -- Only rewrite the command when the user actually picks another
+    -- resolution, so a hand-edited scale= filter is left alone otherwise.
+    local selected_resolution = resolution_input:get_value()
+    if selected_resolution ~= dialog_resolution_id then
+        local preset = resolution_presets[selected_resolution]
+        if preset then
+            local rewritten, replaced = apply_resolution(template, preset.scale)
+            if replaced then
+                template = rewritten
+                command_input:set_text(template)
+                save_config('command', template)
+            else
+                vlc.msg.warn("GIF Maker: command has no scale= filter; resolution setting ignored")
+            end
+        end
+        dialog_resolution_id = selected_resolution
     end
 
     local uri = item:uri()
@@ -431,7 +523,7 @@ function startExtension()
         ffmpegDlg:delete()
         ffmpegDlg = nil
     end
-    gui_create_main_dialog(command, output_path, fps, looping)
+    gui_create_main_dialog(command, output_path, fps, looping, resolution)
 end
 
 -- functions below are called by VLC
@@ -460,6 +552,7 @@ function activate()
     output_path = load_config('output_path', vlc.config.homedir())
     fps = load_config('fps', default_fps)
     looping = tonumber(load_config('looping', tostring(default_looping))) or default_looping
+    resolution = load_config('resolution', default_resolution)
 
     -- is ffmpeg even used in the current command?
     if string.find(command, "ffmpeg") then
@@ -489,6 +582,8 @@ function close()
     command_input = nil
     fps_input = nil
     looping_input = nil
+    resolution_input = nil
+    dialog_resolution_id = nil
 
     if ffmpegDlg then
         ffmpegDlg:delete()

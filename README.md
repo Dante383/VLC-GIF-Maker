@@ -53,6 +53,12 @@ FPS, looping, the command and the output path are remembered across restarts.
 Use "Save settings" to store them immediately, or just generate a GIF / close
 the dialog. "Restore to default" resets the command to the bundled default.
 
+The **Resolution** dropdown applies a preset to the `scale=` part of the
+command: Original (no scaling), 498 px wide (the default), or 144p/240p/360p/
+480p/720p/1080p. Picking a different value rewrites the command when you press
+"Generate GIF", so the command field always shows what will run. Presets above
+the source resolution upscale, so choose Original to keep the source size.
+
 Press "Generate GIF" and it's gonna be saved to the path you specified, followed by a confirmation on the VLC screen. If ffmpeg fails, the extension tells you
 instead of claiming success, and writes the exact command to
 `<VLC config dir>/gif_maker_last_command` for troubleshooting.
@@ -73,6 +79,9 @@ fixes a few issues:
 - ffmpeg failures are reported instead of showing a false "GIF created"
   message; the command is logged for debugging.
 - Input paths are URL-decoded (`%20` etc.).
+- A Resolution dropdown (Original, 498 px wide, 144p–1080p) rewrites the
+  command's `scale=` filter, so resolution can be changed without editing the
+  command by hand.
 - A Linux installer (`install.sh`) is included for Debian-based systems.
 
 ## Adjusting resolution
